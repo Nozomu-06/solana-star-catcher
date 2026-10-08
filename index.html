@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Solana Star Catcher</title>
+<style>
+  :root {
+    --purple: #9945FF;
+    --green: #14F195;
+    --bg: #0d0a1a;
+    --text: #f2eefc;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: "Hiragino Sans", "Yu Gothic", "Segoe UI", system-ui, sans-serif; overflow: hidden; touch-action: manipulation; }
+  body { display: flex; flex-direction: column; align-items: center; }
+  header { width: 100%; max-width: 640px; padding: 14px 16px 10px; text-align: center; }
+  h1 { font-size: clamp(1.3rem, 5vw, 2rem); font-weight: 800; letter-spacing: .02em; background: linear-gradient(90deg, var(--purple), var(--green)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stats { display: flex; justify-content: space-between; margin-top: 8px; font-size: 1.05rem; font-weight: 700; }
+  .stats span b { color: var(--green); font-variant-numeric: tabular-nums; font-size: 1.3rem; margin-left: 4px; }
+  .stats .time b { color: var(--purple); }
+  .stats .time.low b { color: #ff5c7a; }
+  #wrap { position: relative; flex: 1; width: 100%; max-width: 640px; margin-bottom: 12px; border: 2px solid var(--purple); border-radius: 14px; overflow: hidden; background: radial-gradient(ellipse at 50% 0%, #241548 0%, var(--bg) 70%); box-shadow: 0 0 24px rgba(153,69,255,.35); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: rgba(13,10,26,.82); text-align: center; padding: 20px; }
+  .overlay.hidden { display: none; }
+  .overlay h2 { font-size: 1.6rem; }
+  .overlay p { opacity: .85; line-height: 1.6; }
+  .big { font-size: 3.2rem; font-weight: 800; color: var(--green); }
+  button { font: inherit; font-weight: 800; font-size: 1.15rem; padding: 14px 36px; border: 0; border-radius: 999px; color: #0d0a1a; background: linear-gradient(90deg, var(--green), var(--purple)); cursor: pointer; }
+  button:active { transform: scale(.96); }
+  button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Solana Star Catcher</h1>
+  <div class="stats">
+    <span>スコア<b id="score">0</b></span>
+    <span class="time" id="timeBox">残り<b id="time">30</b>秒</span>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div class="overlay" id="startOv">
+    <h2>星をタップして集めよう</h2>
+    <p>落ちてくる星をクリック／タップ。<br>30秒でハイスコアを狙おう。</p>
+    <button id="startBtn">スタート</button>
+  </div>
+  <div class="overlay hidden" id="endOv">
+    <h2>タイムアップ！</h2>
+    <p>あなたのスコア</p>
+    <div class="big" id="finalScore">0</div>
+    <p id="best"></p>
+    <button id="retryBtn">もう一度</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var PURPLE = "#9945FF", GREEN = "#14F195";
+  var canvas = document.getElementById("c");
+  var ctx = canvas.getContext("2d");
+  var scoreEl = document.getElementById("score");
+  var timeEl = document.getElementById("time");
+  var timeBox = document.getElementById("timeBox");
+  var startOv = document.getElementById("startOv");
+  var endOv = document.getElementById("endOv");
+  var finalScore = document.getElementById("finalScore");
+  var bestEl = document.getElementById("best");
+
+  var W = 0, H = 0, dpr = 1;
+  var stars = [], pops = [];
+  var score = 0, best = 0, running = false;
+  var endTime = 0, lastSpawn = 0, lastFrame = 0;
+  var DURATION = 30000;
+
+  try { best = parseInt(localStorage.getItem("ssc_best"), 10) || 0; } catch (e) {}
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    var r = canvas.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+
+  function spawn(now) {
+    var elapsed = DURATION - (endTime - now);
+    var big = Math.random() < 0.2;
+    var r = big ? 22 : 30 + Math.random() * 8;
+    stars.push({
+      x: r + Math.random() * (W - r * 2),
+      y: -r,
+      r: r,
+      vy: (90 + Math.random() * 80 + elapsed / 250) * (big ? 1.6 : 1),
+      rot: Math.random() * 6.28,
+      vr: (Math.random() - .5) * 3,
+      color: big ? PURPLE : GREEN,
+      pts: big ? 3 : 1
+    });
+  }
+
+  function starPath(x, y, r, rot) {
+    ctx.beginPath();
+    for (var i = 0; i < 10; i++) {
+      var rad = i % 2 === 0 ? r : r * 0.45;
+      var a = rot + i * Math.PI / 5 - Math.PI / 2;
+      var px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    stars.forEach(function (s) {
+      ctx.save();
+      ctx.shadowColor = s.color; ctx.shadowBlur = 16;
+      ctx.fillStyle = s.color;
+      starPath(s.x, s.y, s.r, s.rot);
+      ctx.fill();
+      ctx.restore();
+    });
+    pops.forEach(function (p) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.font = "800 22px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("+" + p.pts, p.x, p.y);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function loop(now) {
+    if (!running) return;
+    var dt = Math.min(0.05, (now - lastFrame) / 1000 || 0);
+    lastFrame = now;
+
+    var left = endTime - now;
+    if (left <= 0) { finish(); return; }
+    var sec = Math.ceil(left / 1000);
+    timeEl.textContent = sec;
+    timeBox.classList.toggle("low", sec <= 5);
+
+    var interval = Math.max(330, 700 - (DURATION - left) / 60);
+    if (now - lastSpawn > interval) { spawn(now); lastSpawn = now; }
+
+    stars.forEach(function (s) { s.y += s.vy * dt; s.rot += s.vr * dt; });
+    stars = stars.filter(function (s) { return s.y - s.r < H; });
+    pops.forEach(function (p) { p.y -= 40 * dt; p.life -= dt * 1.6; });
+    pops = pops.filter(function (p) { return p.life > 0; });
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function hit(clientX, clientY) {
+    if (!running) return;
+    var r = canvas.getBoundingClientRect();
+    var x = clientX - r.left, y = clientY - r.top;
+    for (var i = stars.length - 1; i >= 0; i--) {
+      var s = stars[i];
+      var dx = x - s.x, dy = y - s.y;
+      var reach = s.r + 14;
+      if (dx * dx + dy * dy <= reach * reach) {
+        score += s.pts;
+        scoreEl.textContent = score;
+        pops.push({ x: s.x, y: s.y, pts: s.pts, color: s.color, life: 1 });
+        stars.splice(i, 1);
+        return;
+      }
+    }
+  }
+
+  canvas.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    hit(e.clientX, e.clientY);
+  });
+
+  function start() {
+    resize();
+    score = 0; stars = []; pops = [];
+    scoreEl.textContent = "0";
+    timeEl.textContent = "30";
+    timeBox.classList.remove("low");
+    startOv.classList.add("hidden");
+    endOv.classList.add("hidden");
+    running = true;
+    var now = performance.now();
+    endTime = now + DURATION;
+    lastSpawn = now; lastFrame = now;
+    requestAnimationFrame(loop);
+  }
+
+  function finish() {
+    running = false;
+    ctx.clearRect(0, 0, W, H);
+    timeEl.textContent = "0";
+    if (score > best) {
+      best = score;
+      try { localStorage.setItem("ssc_best", String(best)); } catch (e) {}
+      bestEl.textContent = "ベストスコア更新！";
+    } else {
+      bestEl.textContent = "ベストスコア：" + best;
+    }
+    finalScore.textContent = score;
+    endOv.classList.remove("hidden");
+  }
+
+  document.getElementById("startBtn").addEventListener("click", start);
+  document.getElementById("retryBtn").addEventListener("click", start);
+  window.addEventListener("load", resize);
+  resize();
+})();
+</script>
+</body>
+</html>
